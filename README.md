@@ -127,63 +127,59 @@ python image_to_pdf.py /path/to/images --max-mb=150
 ## Setup
 
 ```bash
-python3 -m venv .venv \
-source .venv/bin/activate \
+# Run in repo directory
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
 ## Dependencies
 
-Requirements:
+Required:
 - ImageMagick
-- jbig2enc (optional but recommended for creating smaller PDFs)
+- OCRmyPDF
 
-### Ubuntu Installation Instructions
+Recommended:
+- JBIG2 encoder (optional but recommended for creating smaller PDFs)
+
+### Installing dependencies on Ubuntu
 
 **ImageMagick**
 
 ```bash
-cd ~/tmp \
-wget https://imagemagick.org/archive/binaries/magick \
-sudo mv magick /usr/local/bin/magick \
+cd ~/tmp
+wget https://imagemagick.org/archive/binaries/magick
+sudo mv magick /usr/local/bin/magick
 sudo chmod 755 /usr/local/bin/magick
 ```
 
 **JBIG2 encoder**
 
 ```bash
-sudo apt update \
+sudo apt update
 sudo apt install autotools-dev automake build-essential libtool libleptonica-dev pkg-config
-```
 
-```bash
-cd ~/tmp \
-git clone https://github.com/agl/jbig2enc \
-cd jbig2enc \
-./autogen.sh \
-./configure && make \
-sudo make install \
-cd .. \
+cd ~/tmp
+git clone https://github.com/agl/jbig2enc
+cd jbig2enc
+./autogen.sh
+./configure && make
+sudo make install
+cd ..
 rm -rf jbig2enc
 ```
 
-**OCRmyPDF and Tesseract language packs (after JBIG2 encoder)**
+**OCRmyPDF and Tesseract language packs**
+
+Install after JBIG2 encoder.
 
 ```bash
 sudo apt install ocrmypdf
 sudo apt install tesseract-ocr-all
 ```
 
-**Python libraries**
-
-```bash
-cd ~/dev/image-to-pdf # (or ~/repos/image-to-pdf) \
-source .venv/bin/activate \
-pip install --upgrade pip \
-pip install -r requirements.txt
-```
-
-### macOS Installation Instructions
+### Installing dependencies on macOS
 
 **ImageMagick and Ghostscript**
 
