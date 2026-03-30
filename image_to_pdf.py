@@ -24,7 +24,7 @@ import pikepdf
 # CONFIG
 # ============================================================
 
-IMAGEMAGICK_CMD = "magick"
+IMAGEMAGICK_CMD = "convert" # Set to "magick" for ImageMagick versions > 6
 OCR_CMD = "ocrmypdf"
 ALLOWED_EXT = {".tif", ".tiff", ".jpg", ".jpeg", ".jp2"}
 
@@ -90,11 +90,11 @@ def convert_image_to_pdf(image_path: Path, output_pdf: Path) -> None:
     """Convert a single image into a 1-page PDF using ImageMagick."""
     cmd = [
         IMAGEMAGICK_CMD,
+        "-density", "300",
         str(image_path),
         "-resize", "3500x3500>",
         "-quality", "75",
         "-compress", "jpeg",
-        "-density", "300",
         str(output_pdf)
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

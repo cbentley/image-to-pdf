@@ -145,54 +145,14 @@ Recommended:
 
 ### Installing dependencies on Ubuntu
 
-**ImageMagick**
-
 ```bash
-cd ~/tmp
-wget https://imagemagick.org/archive/binaries/magick
-sudo mv magick /usr/local/bin/magick
-sudo chmod 755 /usr/local/bin/magick
-```
-
-**JBIG2 encoder**
-
-```bash
-sudo apt update
-sudo apt install autotools-dev automake build-essential libtool libleptonica-dev pkg-config
-
-cd ~/tmp
-git clone https://github.com/agl/jbig2enc
-cd jbig2enc
-./autogen.sh
-./configure && make
-sudo make install
-cd ..
-rm -rf jbig2enc
-```
-
-**OCRmyPDF and Tesseract language packs**
-
-Install after JBIG2 encoder.
-
-```bash
-sudo apt install ocrmypdf
-sudo apt install tesseract-ocr-all
+sudo apt update && sudo apt install -y imagemagick jbig2 ocrmypdf tesseract-ocr-all
 ```
 
 ### Installing dependencies on macOS
 
-**ImageMagick and Ghostscript**
-
 ```bash
-brew install imagemagick
-brew install ghostscript
-```
-
-**OCRmyPDF and Tesseract language packs**
-
-```bash
-brew install ocrmypdf
-brew install tesseract-lang
+brew install imagemagick ghostscript ocrmypdf tesseract-lang
 ```
 
 ## Notes
