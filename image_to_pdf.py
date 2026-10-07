@@ -15,6 +15,7 @@ import argparse
 import datetime
 import logging
 import subprocess
+import sys
 from pathlib import Path
 
 import pikepdf
@@ -27,6 +28,9 @@ import pikepdf
 IMAGEMAGICK_CMD = "convert" # Set to "magick" for ImageMagick versions > 6
 OCR_CMD = "ocrmypdf"
 ALLOWED_EXT = {".tif", ".tiff", ".jpg", ".jpeg", ".jp2"}
+
+# Images whose filenames contain any of these words (case-insensitive) are skipped
+EXCLUDED_WORDS = {"ruler"}
 
 # Hardcoded pre-OCR size limit (MB) for merged chunks
 PRE_OCR_MAX_MB = 50
@@ -100,9 +104,30 @@ def convert_image_to_pdf(image_path: Path, output_pdf: Path) -> None:
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
+def is_allowed_ext(path: Path) -> bool:
+    """True if path has an allowed image extension."""
+    return path.suffix.lower() in ALLOWED_EXT
+
+
+def is_excluded(path: Path) -> bool:
+    """True if the filename contains any word in EXCLUDED_WORDS."""
+    name = path.stem.lower()
+    return any(word in name for word in EXCLUDED_WORDS)
+
+
+def is_wanted_image(path: Path) -> bool:
+    """True if path has an allowed extension and no excluded word in its name."""
+    return is_allowed_ext(path) and not is_excluded(path)
+
+
 def convert_all_images(folder: Path, single_pages_dir: Path) -> list[Path]:
     """Convert all allowed images in a folder into single-page PDFs."""
-    images = sorted([p for p in folder.iterdir() if p.suffix.lower() in ALLOWED_EXT])
+    candidates = [p for p in folder.iterdir() if is_allowed_ext(p)]
+    images = sorted(p for p in candidates if not is_excluded(p))
+    skipped = sorted(p.name for p in candidates if is_excluded(p))
+    if skipped:
+        logger.info(f"  Skipped {len(skipped)} excluded image(s): {', '.join(skipped)}")
+
     if not images:
         logger.warning("  No valid images found.")
         return []
@@ -313,10 +338,10 @@ def split_final_pdf_by_size(input_pdf: Path, max_mb: int) -> list[Path]:
 # OCR
 # ============================================================
 
-def ocr_pdf(input_pdf: Path, output_pdf: Path, ocr_lang: str) -> bool:
+def ocr_pdf(input_pdf: Path, output_pdf: Path, ocr_lang: str) -> None:
     """
     Apply OCR to a PDF, writing the result to output_pdf.
-    On failure, the non-OCR input is copied to output_pdf.
+    Raises RuntimeError if OCR fails (OCR is mandatory; there is no fallback).
     """
     cmd = [
         OCR_CMD,
@@ -330,32 +355,20 @@ def ocr_pdf(input_pdf: Path, output_pdf: Path, ocr_lang: str) -> bool:
 
     logger.info(f"  OCRing {input_pdf.name} -> {output_pdf.name}...")
 
-    try:
-        result = subprocess.run(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+
+    if result.returncode != 0:
+        logger.error(f"OCRmyPDF error output for {input_pdf.name}:\n{result.stderr}")
+        raise RuntimeError(
+            f"OCR failed for {input_pdf.name} (OCRmyPDF exit code {result.returncode})"
         )
 
-        if result.returncode != 0:
-            logger.error(f"OCRmyPDF error output for {input_pdf.name}:\n{result.stderr}")
-            raise RuntimeError("OCR failed")
-
-        logger.info(f"  Finished OCR: {output_pdf.name}")
-        return True
-
-    except Exception:
-        logger.exception(
-            f"OCR failed for {input_pdf.name}; copying non-OCR version instead."
-        )
-        try:
-            shutil.copy2(input_pdf, output_pdf)
-        except Exception:
-            logger.exception(
-                f"Failed to copy non-OCR version for {input_pdf.name}."
-            )
-        return False
+    logger.info(f"  Finished OCR: {output_pdf.name}")
 
 
 def ocr_all_pdfs(src_dir: Path, dst_dir: Path, ocr_lang: str) -> list[Path]:
@@ -395,6 +408,17 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+# Folder names that are too generic to name the output; use the parent's name instead
+GENERIC_FOLDER_NAMES = {"master"}
+
+
+def output_base_name(folder: Path) -> str:
+    """Return the base name for a folder's final PDF(s)."""
+    if folder.name.lower() in GENERIC_FOLDER_NAMES:
+        return folder.parent.name
+    return folder.name
+
+
 def cleanup_partial_outputs(folder: Path, base_name: str) -> None:
     """Remove partial merged PDFs after a failure (root-level, if any)."""
     for pdf in folder.glob(f"{base_name}-part*.pdf"):
@@ -409,8 +433,11 @@ def cleanup_partial_outputs(folder: Path, base_name: str) -> None:
 # MAIN
 # ============================================================
 
-def main(argv=None) -> None:
-    """Run the full image→PDF→OCR pipeline with temp work directories."""
+def main(argv=None) -> int:
+    """
+    Run the full image→PDF→OCR pipeline with temp work directories.
+    Returns the process exit code: 0 if all folders succeeded, 1 otherwise.
+    """
     args = parse_args(argv)
 
     input_folder = Path(args.folder).resolve()
@@ -425,6 +452,8 @@ def main(argv=None) -> None:
 
     validate_external_tools()
 
+    failed_folders: list[Path] = []
+
     # Folder processing
     for root, dirs, files in os.walk(input_folder):
         # Skip folders starting with "_"
@@ -435,10 +464,11 @@ def main(argv=None) -> None:
             continue
 
         # Skip folders with no images
-        if not any(Path(f).suffix.lower() in ALLOWED_EXT for f in files):
+        if not any(is_wanted_image(Path(f)) for f in files):
             continue
 
         root_path = Path(root)
+        base_name = output_base_name(root_path)
 
         logger.info(f"\nProcessing folder: {root_path}")
 
@@ -465,7 +495,7 @@ def main(argv=None) -> None:
                 continue
 
             # 2. Pre-OCR merge: size-limited chunks (<= PRE_OCR_MAX_MB) into _work/pre_ocr
-            output_base = f"{root_path.name}_pre"
+            output_base = f"{base_name}_pre"
             merged_pre_ocr = merge_pages_into_chunks(
                 page_pdfs,
                 output_base,
@@ -484,7 +514,7 @@ def main(argv=None) -> None:
 
             # 4. Post-OCR merge: merge all PDFs in _work/ocr into one big PDF in _work/merged
             logger.info("  Merging all OCRed PDFs into single final PDF (in work dir)...")
-            combined_pdf_work = merged_dir / f"{root_path.name}.pdf"
+            combined_pdf_work = merged_dir / f"{base_name}.pdf"
             merge_all_pdfs_in_dir(ocr_dir, combined_pdf_work)
 
             # 5. Post-OCR split: in _work/merged, then move to root
@@ -524,8 +554,9 @@ def main(argv=None) -> None:
         except Exception:
             folder_success = False
             logger.exception(f"Folder failed: {root_path}; leaving _work for debugging.")
+            failed_folders.append(root_path)
             # Clean up any partial root-level outputs matching the folder base name
-            cleanup_partial_outputs(root_path, root_path.name)
+            cleanup_partial_outputs(root_path, base_name)
             continue
         finally:
             # 7. Clean up work directory on success; keep on failure
@@ -542,9 +573,16 @@ def main(argv=None) -> None:
                     f"  Preserving work directory for debugging: {work_dir}"
                 )
 
-    logger.info("Pipeline complete.")
+    if failed_folders:
+        logger.error(f"\nPipeline finished with {len(failed_folders)} failed folder(s):")
+        for folder in failed_folders:
+            logger.error(f"  {folder}")
+    else:
+        logger.info("Pipeline complete.")
     logger.info(f"Log written to: {log_file}")
+
+    return 1 if failed_folders else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

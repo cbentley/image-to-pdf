@@ -1,0 +1,38 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+A single-file CLI (`image_to_pdf.py`) that turns folders of scanned images (`.tif/.tiff/.jpg/.jpeg/.jp2`) into OCR'd, size-capped PDFs. `README.md` documents user-facing behavior and options.
+
+## Setup & running
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt          # only Python dep: pikepdf
+python image_to_pdf.py /path/to/images [--max-mb=100] [--ocr-lang=deu+eng]
+```
+
+External tools must be on PATH: ImageMagick, OCRmyPDF (with Tesseract language packs), optionally `jbig2`. `validate_external_tools()` checks them at startup.
+
+There is no test suite, linter config, or build step. To verify changes, run the script against a small sample folder of images; logs go to `<input>/_logs/<timestamp>_log.txt`.
+
+## Architecture
+
+`main()` does an `os.walk` over the input folder and runs the pipeline **independently for every subfolder that directly contains images** (each folder produces its own `<foldername>.pdf`; images are not aggregated across folders). Directories whose names start with `_` are pruned from the walk, which is how the script's own `_work` and `_logs` dirs are excluded.
+
+Per-folder stages, each writing to a numbered subdir of `<folder>/_work/`:
+
+1. `01_single_pages` — `convert_image_to_pdf` shells out to ImageMagick (300 dpi, resize to ≤3500px, JPEG q75).
+2. `02_pre_ocr` — `merge_pages_into_chunks` merges pages into chunks capped at `PRE_OCR_MAX_MB` (50, hardcoded) to keep OCRmyPDF inputs manageable.
+3. `03_ocr` — `ocr_pdf` runs OCRmyPDF (`--optimize 3 --deskew --rotate-pages`). If OCR fails for any chunk it raises, failing the whole folder (no non-OCR fallback).
+4. `04_merged` — `merge_all_pdfs_in_dir` combines all OCR'd chunks; if larger than `--max-mb`, `split_final_pdf_by_size` splits it into `-partNN` files.
+5. Final PDFs are moved into the source folder (overwriting). `_work` is deleted on success and preserved on failure; on failure, root-level `<name>-part*.pdf` files are removed. Failed folders are listed at the end of the run and `main()` returns exit code 1.
+
+Implementation notes:
+- Size-capped merging/splitting is done by appending one page at a time, re-saving, checking file size, and rolling back the last page when over the cap. This is simple but does a full save per page.
+- Ordering relies on lexical sort of filenames, so chunk names use zero padding (`_page000000`, dynamic padding in `apply_dynamic_padding`, `-part01` in the final split). Preserve this when changing naming.
+- Output names come from `output_base_name()`: the image folder's name, or its parent's name if the folder is in `GENERIC_FOLDER_NAMES` (currently `master`). Output still lands inside the image folder.
+- Image selection goes through `is_wanted_image()` (allowed extension and no `EXCLUDED_WORDS` substring in the filename, case-insensitive). Both the folder-skip check in `main()` and `convert_all_images` use it; keep them in sync.
+- `IMAGEMAGICK_CMD` is `"convert"` for ImageMagick 6 compatibility; ImageMagick 7 users should set it to `"magick"`.

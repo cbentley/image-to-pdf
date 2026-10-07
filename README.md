@@ -6,7 +6,8 @@ This script converts folders of images into size-limited, OCR-processed PDFs. It
 
 Given a folder containing images, the script:
 
-* Recursively discovers supported image files
+* Recursively searches the input folder (including the input folder itself) for folders that contain supported image files
+* Processes each such folder independently, producing one PDF (or set of split parts) per folder
 * Converts each image into a single-page PDF
 * Merges PDFs into size-capped batches
 * Applies OCR to all content (mandatory)
@@ -19,15 +20,20 @@ All intermediate processing occurs in a per-folder `_work` directory, which is a
 For each input folder, the script performs the following steps:
 
 1. **Folder traversal**
-   Recursively walk the input directory and detect supported image files.
+   Recursively walk the input directory. Every folder that directly contains
+   supported image files is processed as its own unit and produces its own
+   PDF(s); images are never combined across folders. Only the images directly
+   inside a folder are included, not those in its subfolders. Folders without
+   images are passed over.
    Any folder whose name starts with `_` is skipped.
+   Images whose filenames contain an excluded word (currently `ruler`, case-insensitive) are skipped; edit `EXCLUDED_WORDS` in the script to change the list.
 
 2. **Image to single-page PDF conversion**
    Each image is converted into a single-page PDF using ImageMagick.
    Output location:
 
    ```
-   <folder>/_work/single_pages
+   <folder>/_work/01_single_pages
    ```
 
 3. **Pre-OCR PDF merging**
@@ -35,7 +41,7 @@ For each input folder, the script performs the following steps:
    Output location:
 
    ```
-   <folder>/_work/pre_ocr
+   <folder>/_work/02_pre_ocr
    ```
 
 4. **OCR processing**
@@ -43,7 +49,7 @@ For each input folder, the script performs the following steps:
    Output location:
 
    ```
-   <folder>/_work/ocr
+   <folder>/_work/03_ocr
    ```
 
 5. **Final merge**
@@ -53,10 +59,12 @@ For each input folder, the script performs the following steps:
    <foldername>.pdf
    ```
 
+   If the image folder is named `master` (case-insensitive), the parent folder's name is used instead, e.g. `b01-f01/master/` → `b01-f01.pdf`.
+
    Output location:
 
    ```
-   <folder>/_work/merged
+   <folder>/_work/04_merged
    ```
 
 6. **Final size enforcement**
@@ -84,6 +92,8 @@ For each input folder, the script performs the following steps:
 
    * On success: `<folder>/_work` is deleted
    * On error: `<folder>/_work` is preserved for debugging
+
+   Processing continues with the next folder after an error. At the end of the run, failed folders are listed and the script exits with status `1` (`0` if every folder succeeded).
 
 ## Usage
 
@@ -157,6 +167,6 @@ brew install imagemagick ghostscript ocrmypdf tesseract-lang
 
 ## Notes
 
-* OCR is always applied; there is no non-OCR mode.
+* OCR is always applied; there is no non-OCR mode. If OCR fails on any part of a folder, that folder fails and no PDF is produced for it.
 * Intermediate files are intentionally isolated in `_work` to avoid polluting the source folder.
 * Any folder starting with `_` is ignored during traversal.
