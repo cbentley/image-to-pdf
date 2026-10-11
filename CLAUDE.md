@@ -31,7 +31,7 @@ Per-folder stages, each writing to a numbered subdir of `<folder>/_work/`:
 5. Final PDFs are moved into the source folder (overwriting). `_work` is deleted on success and preserved on failure; on failure, root-level `<name>-part*.pdf` files are removed. Failed folders are listed at the end of the run and `main()` returns exit code 1.
 
 Implementation notes:
-- Size-capped merging/splitting is done by appending one page at a time, re-saving, checking file size, and rolling back the last page when over the cap. This is simple but does a full save per page.
+- Size-capped merging/splitting is done by appending one page at a time, re-saving, checking file size, and rolling back the last page when over the cap (unless it is alone in its part: an oversized single page is kept as its own part, with a warning). This is simple but does a full save per page.
 - Ordering relies on lexical sort of filenames, so chunk names use zero padding (`_page000000`, dynamic padding in `apply_dynamic_padding`, `-part01` in the final split). Preserve this when changing naming.
 - Output names come from `output_base_name()`: the image folder's name, or its parent's name if the folder is in `GENERIC_FOLDER_NAMES` (currently `master`). Output still lands inside the image folder.
 - Image selection goes through `is_wanted_image()` (allowed extension and no `EXCLUDED_WORDS` substring in the filename, case-insensitive). Both the folder-skip check in `main()` and `convert_all_images` use it; keep them in sync.

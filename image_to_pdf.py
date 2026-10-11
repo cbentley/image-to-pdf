@@ -91,7 +91,7 @@ def setup_logging(log_file: Path) -> None:
 def validate_external_tools() -> None:
     """Verify ImageMagick and OCRmyPDF are available (OCR mandatory)."""
     tools = {
-        "ImageMagick (magick)": [IMAGEMAGICK_CMD, "--version"],
+        f"ImageMagick ({IMAGEMAGICK_CMD})": [IMAGEMAGICK_CMD, "--version"],
         "OCRmyPDF": [OCR_CMD, "--version"],
     }
 
@@ -245,8 +245,9 @@ def merge_pages_into_chunks(
             pdf.save(current_pdf)
             size_mb = pdf_size_mb(current_pdf)
 
-        # Size check happens OUTSIDE the inner with
-        if size_mb > max_mb:
+        # Size check happens OUTSIDE the inner with.
+        # A page alone in its part stays there even if oversized (it can't be split).
+        if size_mb > max_mb and len(pdf.pages) > 1:
             # Undo the last page
             del pdf.pages[-1]
             pdf.save(current_pdf)
@@ -264,6 +265,13 @@ def merge_pages_into_chunks(
             with pikepdf.open(page_pdf) as page_doc:
                 pdf.pages.extend(page_doc.pages)
                 pdf.save(current_pdf)
+            size_mb = pdf_size_mb(current_pdf)
+
+        if size_mb > max_mb:
+            logger.warning(
+                f"  {page_pdf.name} alone is {size_mb:.1f} MB (> {max_mb} MB); "
+                f"keeping it as an oversized part"
+            )
 
     # Final PDF
     finalize_part(pdf, current_pdf, merged_files)
@@ -324,12 +332,13 @@ def split_final_pdf_by_size(input_pdf: Path, max_mb: int) -> list[Path]:
     pdf = open_pdf(current_pdf)
 
     with pikepdf.open(input_pdf) as src:
-        for page in src.pages:
+        for page_num, page in enumerate(src.pages, start=1):
             pdf.pages.append(page)
             pdf.save(current_pdf)
             size_mb = pdf_size_mb(current_pdf)
 
-            if size_mb > max_mb:
+            # A page alone in its part stays there even if oversized (it can't be split)
+            if size_mb > max_mb and len(pdf.pages) > 1:
                 # Undo the last page
                 del pdf.pages[-1]
                 pdf.save(current_pdf)
@@ -346,6 +355,13 @@ def split_final_pdf_by_size(input_pdf: Path, max_mb: int) -> list[Path]:
                 # Re-add the page we deferred
                 pdf.pages.append(page)
                 pdf.save(current_pdf)
+                size_mb = pdf_size_mb(current_pdf)
+
+            if size_mb > max_mb:
+                logger.warning(
+                    f"  Page {page_num} alone is {size_mb:.1f} MB (> {max_mb} MB); "
+                    f"keeping it as an oversized part"
+                )
 
     finalize_part(pdf, current_pdf, merged_files)
 
