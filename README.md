@@ -1,103 +1,26 @@
 # Image Folder to OCR PDF Converter
 
-This script converts folders of images into size-limited, OCR-processed PDFs. It is designed for large image collections and produces searchable, final PDFs while keeping intermediate artifacts isolated and disposable.
+Converts folders of scanned images into searchable, size-limited PDFs. Built for large image collections.
 
-## Overview
+## Setup
 
-Given a folder containing images, the script:
+Requires ImageMagick and OCRmyPDF (with Ghostscript and Tesseract language packs):
 
-* Recursively searches the input folder (including the input folder itself) for folders that contain supported image files
-* Processes each such folder independently, producing one PDF (or set of split parts) per folder
-* Converts each image into a single-page PDF
-* Merges PDFs into size-capped batches
-* Applies OCR to all content (mandatory)
-* Produces one or more final, size-limited PDFs in the original folder
+```bash
+# Ubuntu
+sudo apt update && sudo apt install -y imagemagick ocrmypdf tesseract-ocr-all
 
-All intermediate processing occurs in a per-folder `_work` directory, which is automatically cleaned up on success.
+# macOS
+brew install imagemagick ghostscript ocrmypdf tesseract-lang
+```
 
-## Processing Pipeline
+Then, in the repo directory:
 
-For each input folder, the script performs the following steps:
-
-1. **Folder traversal**
-   Recursively walk the input directory. Every folder that directly contains
-   supported image files is processed as its own unit and produces its own
-   PDF(s); images are never combined across folders. Only the images directly
-   inside a folder are included, not those in its subfolders. Folders without
-   images are passed over.
-   Any folder whose name starts with `_` is skipped.
-   Images whose filenames contain an excluded word (currently `ruler`, case-insensitive) are skipped; edit `EXCLUDED_WORDS` in the script to change the list.
-
-2. **Image to single-page PDF conversion**
-   Each image is converted into a single-page PDF using ImageMagick. Images
-   larger than 3500 px on their longest side are scaled down to 3500 px, and
-   every page is stored as a JPEG at quality 75. This is the only step that
-   compresses the images; all later steps leave them unchanged, so it alone
-   determines image quality and file size.
-   Output location:
-
-   ```
-   <folder>/_work/01_single_pages
-   ```
-
-3. **Pre-OCR PDF merging**
-   Single-page PDFs are merged into multi-page PDFs, each capped at **50 MB** (pre-OCR).
-   Output location:
-
-   ```
-   <folder>/_work/02_pre_ocr
-   ```
-
-4. **OCR processing**
-   OCR is applied to each pre-OCR PDF using OCRmyPDF.
-   Output location:
-
-   ```
-   <folder>/_work/03_ocr
-   ```
-
-5. **Final merge**
-   All OCR-processed PDFs are merged into a single PDF named:
-
-   ```
-   <foldername>.pdf
-   ```
-
-   If the image folder is named `master` (case-insensitive), the parent folder's name is used instead, e.g. `b01-f01/master/` → `b01-f01.pdf`.
-
-   Output location:
-
-   ```
-   <folder>/_work/04_merged
-   ```
-
-6. **Final size enforcement**
-   If the merged PDF exceeds `--max-mb`, it is split into parts:
-
-   ```
-   <foldername>-part01.pdf
-   <foldername>-part02.pdf
-   ...
-   ```
-
-   Each part is ≤ `--max-mb`.
-   The original oversized PDF is removed if splitting occurs.
-
-7. **Final output placement**
-   The final PDF(s) are moved into the original image folder:
-
-   ```
-   <folder>/
-   ```
-
-   Existing files with the same names are overwritten.
-
-8. **Cleanup**
-
-   * On success: `<folder>/_work` is deleted
-   * On error: `<folder>/_work` is preserved for debugging
-
-   Processing continues with the next folder after an error. At the end of the run, failed folders are listed and the script exits with status `1` (`0` if every folder succeeded).
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Usage
 
@@ -105,70 +28,56 @@ For each input folder, the script performs the following steps:
 python image_to_pdf.py <folder> [options]
 ```
 
-## Options
+| Option              | Description                                                    | Default   |
+| ------------------- | -------------------------------------------------------------- | --------- |
+| `--max-mb=<size>`   | Maximum size of each final PDF in MB; larger output is split   | `100`     |
+| `--ocr-lang=<lang>` | OCR languages, passed to OCRmyPDF `-l` (e.g. `eng`, `deu+eng`) | `deu+eng` |
 
-| Option               | Description                                         | Default   |
-| -------------------- | --------------------------------------------------- | --------- |
-| `--max-mb=<size>`    | Maximum size (in MB) of final PDFs before splitting | `100`     |
-| `--ocr-lang=<langs>` | Languages passed to OCRmyPDF (`-l`)                 | `deu+eng` |
+Example: `python image_to_pdf.py /path/to/images --ocr-lang=eng --max-mb=150`
 
-Language examples:
+## What it does
 
-* `eng`
-* `deu`
-* `eng+deu`
+The script searches `<folder>` and all its subfolders. Every folder that directly contains images (`.tif`, `.tiff`, `.jpg`, `.jpeg`, `.jp2`) produces its own PDF; images are never combined across folders. Pages are sorted by filename.
 
-## Examples
+Skipped:
+- folders whose names start with `_`
+- images whose filenames contain an excluded word (currently `ruler`, case-insensitive)
 
-Process a folder with default settings:
+Output is written into each image folder, overwriting files with the same name:
+- `<foldername>.pdf`, or `<foldername>-part01.pdf`, `-part02.pdf`, … when it exceeds `--max-mb`
+- A folder named `master` (case-insensitive) takes its parent's name: `b01-f01/master/` → `b01-f01.pdf`
 
-```bash
-python image_to_pdf.py /path/to/images
-```
+A log of each run is written to `<folder>/_logs/<timestamp>_log.txt`.
 
-Use English-only OCR:
+### Pipeline
 
-```bash
-python image_to_pdf.py /path/to/images --ocr-lang=eng
-```
+Each image folder is processed in its own `_work` directory:
 
-Increase the final PDF size limit to 150 MB:
+| Step             | Work directory          | What happens                                                                                                                                                                             |
+| ---------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Convert       | `_work/01_single_pages` | ImageMagick turns each image into a one-page PDF. Images over 3500 px on the long side are scaled down to 3500 px, and pages are stored as JPEG quality 75. This is the only lossy step. |
+| 2. Batch         | `_work/02_pre_ocr`      | Pages are merged into batches of up to 50 MB for OCR.                                                                                                                                    |
+| 3. OCR           | `_work/03_ocr`          | OCRmyPDF adds a searchable text layer without changing the images.                                                                                                                       |
+| 4. Merge & split | `_work/04_merged`       | Batches are merged into one PDF, which is split into parts if it exceeds `--max-mb`.                                                                                                     |
+| 5. Finish        |                         | The final PDFs are moved into the image folder and `_work` is deleted.                                                                                                                   |
 
-```bash
-python image_to_pdf.py /path/to/images --max-mb=150
-```
+### Errors
 
-## Setup
+If any step fails for a folder, including OCR (there is no non-OCR fallback), that folder gets no PDF, its `_work` directory is kept for debugging, and the script moves on to the next folder. Failed folders are listed at the end, and the exit status is `1` (`0` if all succeeded).
 
-```bash
-# Run in repo directory
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+## Configuration
 
-## Dependencies
+Other settings are constants at the top of `image_to_pdf.py`:
 
-Required:
-- ImageMagick
-- OCRmyPDF (with Ghostscript and Tesseract language packs)
+| Constant                  | Controls                                                              |
+| ------------------------- | --------------------------------------------------------------------- |
+| `ALLOWED_EXT`             | Image file extensions to process                                      |
+| `EXCLUDED_WORDS`          | Filename words that cause an image to be skipped                      |
+| `GENERIC_FOLDER_NAMES`    | Folder names that take their output name from the parent folder       |
+| `IMAGEMAGICK_CMD`         | ImageMagick command: `convert` for version 6, `magick` for version 7  |
+| `IMAGEMAGICK_INPUT_OPTS`  | ImageMagick options before the input file (e.g. `-density`)           |
+| `IMAGEMAGICK_OUTPUT_OPTS` | ImageMagick options after the input file (resize limit, JPEG quality) |
+| `OCR_OPTS`                | OCRmyPDF options (language comes from `--ocr-lang`)                   |
+| `PRE_OCR_MAX_MB`          | Batch size for OCR (step 2)                                           |
 
-### Installing dependencies on Ubuntu
-
-```bash
-sudo apt update && sudo apt install -y imagemagick ocrmypdf tesseract-ocr-all
-```
-
-### Installing dependencies on macOS
-
-```bash
-brew install imagemagick ghostscript ocrmypdf tesseract-lang
-```
-
-## Notes
-
-* OCR is always applied; there is no non-OCR mode. If OCR fails on any part of a folder, that folder fails and no PDF is produced for it.
-* Sideways, upside-down, or crooked scans are left as scanned; pages are not auto-rotated or deskewed.
-* Intermediate files are intentionally isolated in `_work` to avoid polluting the source folder.
-* Any folder starting with `_` is ignored during traversal.
+These OCRmyPDF options re-encode every page image, adding a second lossy compression: `--optimize 2` or `3`, `--deskew`, and PDF/A output (the default if `--output-type pdf` is removed). `--rotate-pages` is lossless.
