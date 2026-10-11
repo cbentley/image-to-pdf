@@ -29,7 +29,11 @@ For each input folder, the script performs the following steps:
    Images whose filenames contain an excluded word (currently `ruler`, case-insensitive) are skipped; edit `EXCLUDED_WORDS` in the script to change the list.
 
 2. **Image to single-page PDF conversion**
-   Each image is converted into a single-page PDF using ImageMagick.
+   Each image is converted into a single-page PDF using ImageMagick. Images
+   larger than 3500 px on their longest side are scaled down to 3500 px, and
+   every page is stored as a JPEG at quality 75. This is the only step that
+   compresses the images; all later steps leave them unchanged, so it alone
+   determines image quality and file size.
    Output location:
 
    ```
@@ -148,15 +152,12 @@ pip install -r requirements.txt
 
 Required:
 - ImageMagick
-- OCRmyPDF
-
-Recommended:
-- JBIG2 encoder (optional but recommended for creating smaller PDFs)
+- OCRmyPDF (with Ghostscript and Tesseract language packs)
 
 ### Installing dependencies on Ubuntu
 
 ```bash
-sudo apt update && sudo apt install -y imagemagick jbig2 ocrmypdf tesseract-ocr-all
+sudo apt update && sudo apt install -y imagemagick ocrmypdf tesseract-ocr-all
 ```
 
 ### Installing dependencies on macOS
@@ -168,5 +169,6 @@ brew install imagemagick ghostscript ocrmypdf tesseract-lang
 ## Notes
 
 * OCR is always applied; there is no non-OCR mode. If OCR fails on any part of a folder, that folder fails and no PDF is produced for it.
+* Sideways, upside-down, or crooked scans are left as scanned; pages are not auto-rotated or deskewed.
 * Intermediate files are intentionally isolated in `_work` to avoid polluting the source folder.
 * Any folder starting with `_` is ignored during traversal.

@@ -25,22 +25,45 @@ import pikepdf
 # CONFIG
 # ============================================================
 
-IMAGEMAGICK_CMD = "convert" # Set to "magick" for ImageMagick versions > 6
-OCR_CMD = "ocrmypdf"
+# --- Input selection ---
 ALLOWED_EXT = {".tif", ".tiff", ".jpg", ".jpeg", ".jp2"}
-
 # Images whose filenames contain any of these words (case-insensitive) are skipped
 EXCLUDED_WORDS = {"ruler"}
+# Folder names that are too generic to name the output; use the parent's name instead
+GENERIC_FOLDER_NAMES = {"master"}
 
-# Hardcoded pre-OCR size limit (MB) for merged chunks
+# --- ImageMagick (image -> single-page PDF; the only lossy step) ---
+IMAGEMAGICK_CMD = "convert" # Set to "magick" for ImageMagick versions > 6
+# Placed before the input file (read settings; -density must go here)
+IMAGEMAGICK_INPUT_OPTS = ["-density", "300"]
+# Placed after the input file (processing and output encoding)
+IMAGEMAGICK_OUTPUT_OPTS = [
+    "-resize", "3500x3500>",
+    "-quality", "75", # 1-100
+    "-compress", "jpeg",
+]
+
+# --- OCRmyPDF (language is set by --ocr-lang) ---
+OCR_CMD = "ocrmypdf"
+# --optimize 2/3, PDF/A output and --deskew re-encode page images; --rotate-pages is lossless.
+OCR_OPTS = [
+    "--optimize", "1", # 0-3
+    #"--deskew", # re-encodes JPEG
+    #"--rotate-pages",
+    "--output-type", "pdf",
+]
+
+# --- Merging ---
+# Size limit (MB) for merged chunks fed to OCR
 PRE_OCR_MAX_MB = 50
-
-logger = logging.getLogger("image_to_pdf_pipeline")
 
 
 # ============================================================
 # LOGGING SETUP
 # ============================================================
+
+logger = logging.getLogger("image_to_pdf_pipeline")
+
 
 def setup_logging(log_file: Path) -> None:
     """Configure module-level logger for file + console output."""
@@ -94,11 +117,9 @@ def convert_image_to_pdf(image_path: Path, output_pdf: Path) -> None:
     """Convert a single image into a 1-page PDF using ImageMagick."""
     cmd = [
         IMAGEMAGICK_CMD,
-        "-density", "300",
+        *IMAGEMAGICK_INPUT_OPTS,
         str(image_path),
-        "-resize", "3500x3500>",
-        "-quality", "75",
-        "-compress", "jpeg",
+        *IMAGEMAGICK_OUTPUT_OPTS,
         str(output_pdf)
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -345,9 +366,7 @@ def ocr_pdf(input_pdf: Path, output_pdf: Path, ocr_lang: str) -> None:
     """
     cmd = [
         OCR_CMD,
-        "--optimize", "3",
-        "--deskew",
-        "--rotate-pages",
+        *OCR_OPTS,
         "-l", ocr_lang,
         str(input_pdf),
         str(output_pdf),
@@ -406,10 +425,6 @@ def parse_args(argv=None):
         help='Languages to use for OCR. Examples: "eng", "deu", "eng+deu".'
     )
     return parser.parse_args(argv)
-
-
-# Folder names that are too generic to name the output; use the parent's name instead
-GENERIC_FOLDER_NAMES = {"master"}
 
 
 def output_base_name(folder: Path) -> str:
