@@ -39,7 +39,7 @@ IMAGEMAGICK_INPUT_OPTS = ["-density", "300"]
 # Placed after the input file (processing and output encoding)
 IMAGEMAGICK_OUTPUT_OPTS = [
     "-resize", "3500x3500>",
-    "-quality", "75", # 1-100
+    "-quality", "75",
     "-compress", "jpeg",
 ]
 
@@ -47,9 +47,9 @@ IMAGEMAGICK_OUTPUT_OPTS = [
 OCR_CMD = "ocrmypdf"
 # --optimize 2/3, PDF/A output and --deskew re-encode page images; --rotate-pages is lossless.
 OCR_OPTS = [
-    "--optimize", "1", # 0-3
-    #"--deskew", # re-encodes JPEG
-    #"--rotate-pages",
+    "--optimize", "1", # Use 1 for photos, 3 for text
+    #"--deskew", # Also re-encodes the JPEG
+    #"--rotate-pages", # Use for text
     "--output-type", "pdf",
 ]
 
